@@ -1,0 +1,89 @@
+---
+title: "Q5"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+
+```{r}
+library(foreign)
+library(data.table)
+library(knitr)
+library(sandwich)
+library(lmtest)
+library(dplyr)
+library(AER)
+library(stargazer)
+
+
+
+#data preparation
+#d <- ('http://ischool.berkeley.edu/~d.alex.hughes/data/hill_kousser_analysisFile.csv')
+
+d <- data.frame("id" = 1:103126)
+
+d$adgroup  = c(rep("Ad Set A", 23616),  rep("Ad Set B", 23496), rep("Ad Set C", 27230), rep("Ad Set D", 28784))
+
+d$platform  = c(rep("mobile_app", 22272),  rep("mobile_web", 1072),rep("desktop", 272), 
+                rep("mobile_app", 22032),  rep("mobile_web", 952),rep("desktop", 512),
+                rep("mobile_app", 25600), rep("desktop", 934), rep("mobile_web", 696),
+                rep("mobile_app", 25888), rep("desktop", 1856), rep("mobile_web", 1040))
+
+
+
+d$uniqueclicks = c(rep(1, 569), rep(0, 22272 - 569), rep(1, 22), rep(0, 1072-22), rep(1,9), rep(0,272-9),
+                   rep(1, 320), rep(0, 22032 - 320), rep(1, 10), rep(0, 952-10), rep(1,3), rep(0,512-3),
+                   rep(1, 503), rep(0, 25600 - 503), rep(1, 16), rep(0, 934-16), rep(1,15), rep(0,696-15),
+                    rep(1, 419), rep(0, 25888 - 419), rep(1, 23), rep(0, 1856-23), rep(1,14), rep(0,1040-14))
+
+
+d$picture = c(rep(1,23616), rep(0, 23496), rep(1, 27230), rep(0,28784))
+
+d$positive_rev = c(rep(1,47112), rep(0,56014))
+
+head(d)
+
+
+
+```
+
+
+
+```{r}
+
+d2 <- data.table(d)
+d$nopicture = 1-d$picture
+d$negative_rev= 1-d$positive_rev
+
+d2[]
+
+mod1 = lm(uniqueclicks*100 ~ picture, data = d)
+summary(mod1)
+
+
+mod2 = lm(uniqueclicks*100 ~ picture + positive_rev, data = d)
+summary(mod2)
+
+
+mod3 = lm(uniqueclicks*100 ~ picture + positive_rev + picture * positive_rev, data = d)
+summary(mod3)
+
+
+
+mod5 = lm(uniqueclicks*100 ~ nopicture+ negative_rev + negative_rev * nopicture, data = d)
+summary(mod5)
+
+
+modvar = vcovHC(mod5)
+
+coeftest(mod5, modvar)
+
+```
