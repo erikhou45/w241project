@@ -25,42 +25,174 @@ library(AER)
 library(stargazer)
 ```
 
+## Covariate Balance Check
+
+Since we don't have access to define the randomization process for A/B testing on Facebook. We definitely want to check the covariates' balance in different treatment groups.
 
 ```{r}
-# load the raw aggregated data downloaded from Facebook
-d_raw <- fread("data_w241_final_project.csv")
-d_raw <- as.data.frame(d_raw)
-head(d_raw)
+# load the raw aggregated data downloaded from Facebook with gender and age
+d_raw_ag <- fread("data_w241_final_project_ag.csv")
+d_raw_ag <- as.data.frame(d_raw_ag)
+d_raw_ag
 ```
 
 ```{r}
 # Transform the data by creating records from the aggregated records
 
-ROW_COUNT = nrow(d_raw)
+# Transform the data by creating records from the aggregated records
+
+ROW_COUNT = nrow(d_raw_ag)
 reivew_image = c()
 postive_review = c()
 ad = c()
-platform = c()
+ad_desc = c()
+age_group = c()
+gender = c()
 click = c()
 
 for (i in 1:ROW_COUNT) {
-  ad_set <- d_raw[i,"Ad Set Name"]
-  device_platform <- d_raw[i, "Device Platform"]
-  reach <- d_raw[i, "Reach"]
-  unique_clicks <- d_raw[i, "Unique Link Clicks"]
+  ad_set <- d_raw_ag[i,"Ad Set Name"]
+  age <- d_raw_ag[i, "Age"]
+  gen <- d_raw_ag[i, "Gender"]
+  reach <- d_raw_ag[i, "Reach"]
+  unique_clicks <- d_raw_ag[i, "Unique Link Clicks"]
+  # print(unique_clicks)
   
   if (ad_set == "Ad Set for Ad A") {
     reivew_image <- append(reivew_image, rep(1, reach))
     postive_review <- append(postive_review, rep(1, reach))
+    ad <- append(ad, rep("A", reach))
+    ad_desc <- append(ad_desc, rep("Positve Reveiw with Image", reach))
   } else if (ad_set == "Ad Set for Ad B") {
     reivew_image <- append(reivew_image, rep(0, reach))
     postive_review <- append(postive_review, rep(1, reach))
+    ad <- append(ad, rep("B", reach))
+    ad_desc <- append(ad_desc, rep("Positve Reveiw without Image", reach))
   } else if (ad_set == "Ad Set for Ad C") {
     reivew_image <- append(reivew_image, rep(1, reach))
     postive_review <- append(postive_review, rep(0, reach))
+    ad <- append(ad, rep("C", reach))
+    ad_desc <- append(ad_desc, rep("Negative Reveiw with Image", reach))
   } else {
     reivew_image <- append(reivew_image, rep(0, reach))
     postive_review <- append(postive_review, rep(0, reach))
+    ad <- append(ad, rep("D", reach))
+    ad_desc <- append(ad_desc, rep("Negative Reveiw without Image", reach))
+  }
+  
+  age_group <- append(age_group, rep(age, reach))
+  gender <- append(gender, rep(gen, reach))
+  
+  if (is.na(unique_clicks)) {
+    click <- append(click, rep(0, reach))
+  }
+  else {
+    click <- append(click, rep(1, unique_clicks))
+    click <- append(click, rep(0, reach - unique_clicks))
+  }
+}
+
+d_ag <- data.table(
+                     ad = ad,
+                     ad_desc = ad_desc,
+                     reivew_image = reivew_image,
+                     postive_review = postive_review,
+                     age_group = age_group,
+                     gender = gender,
+                     click = click)
+
+# Look at data summary to confirm the number of data loaded and check means and quntiles
+summary(d_ag)
+d_ag[10000,]
+```
+```{r}
+d_ag[, unique(gender)]
+```
+
+
+```{r}
+mod_cov_check_1 <- d_ag[, lm(reivew_image ~ as.factor(gender))]
+mod_cov_check_2 <- d_ag[, lm(reivew_image ~ as.factor(age_group))]
+# mod_cov_check_1 <- d_ag[, lm(as.factor(gender) ~ ad)]
+summary(mod_cov_check_1)
+summary(mod_cov_check_2)
+```
+
+```{r}
+null_mod <- d_ag[ , lm(reivew_image ~ 1)]
+full_mod <- d_ag[ , lm(reivew_image ~ as.factor(gender)+as.factor(age_group))]
+anova_mod <- anova(full_mod, null_mod, test = 'F')
+anova_mod
+```
+
+
+
+```{r}
+mod_1 <- d_ag[, lm(click ~ reivew_image + postive_review + reivew_image * postive_review)]
+summary(mod_1)
+mod_2 <- d_ag[, lm(click ~ reivew_image + postive_review + reivew_image * postive_review
+                   + as.factor(gender))]
+summary(mod_2)
+```
+
+
+
+```{r}
+# load the raw aggregated data downloaded from Facebook with device platform
+d_raw_plat <- fread("data_w241_final_project.csv")
+d_raw_plat <- as.data.frame(d_raw_plat)
+head(d_raw_plat)
+```
+
+```{r}
+v = c("ABC D")
+v == "ABC D"
+is.vector(v)
+
+v1 = v[1]
+is.vector(v1)
+print(v1)
+print(1)
+```
+
+
+```{r}
+# Transform the data by creating records from the aggregated records
+
+ROW_COUNT = nrow(d_raw_plat)
+reivew_image = c()
+postive_review = c()
+ad = c()
+ad_desc = c()
+platform = c()
+click = c()
+
+for (i in 1:ROW_COUNT) {
+  ad_set <- d_raw_plat[i,"Ad Set Name"]
+  device_platform <- d_raw_plat[i, "Device Platform"]
+  reach <- d_raw_plat[i, "Reach"]
+  unique_clicks <- d_raw_plat[i, "Unique Link Clicks"]
+  
+  if (ad_set == "Ad Set for Ad A") {
+    reivew_image <- append(reivew_image, rep(1, reach))
+    postive_review <- append(postive_review, rep(1, reach))
+    ad <- append(ad, rep("A", reach))
+    ad_desc <- append(ad_desc, rep("Positve Reveiw with Image", reach))
+  } else if (ad_set == "Ad Set for Ad B") {
+    reivew_image <- append(reivew_image, rep(0, reach))
+    postive_review <- append(postive_review, rep(1, reach))
+    ad <- append(ad, rep("B", reach))
+    ad_desc <- append(ad_desc, rep("Positve Reveiw without Image", reach))
+  } else if (ad_set == "Ad Set for Ad C") {
+    reivew_image <- append(reivew_image, rep(1, reach))
+    postive_review <- append(postive_review, rep(0, reach))
+    ad <- append(ad, rep("C", reach))
+    ad_desc <- append(ad_desc, rep("Negative Reveiw with Image", reach))
+  } else {
+    reivew_image <- append(reivew_image, rep(0, reach))
+    postive_review <- append(postive_review, rep(0, reach))
+    ad <- append(ad, rep("D", reach))
+    ad_desc <- append(ad_desc, rep("Negative Reveiw without Image", reach))
   }
   
   platform <- append(platform, rep(device_platform, reach))
@@ -69,28 +201,31 @@ for (i in 1:ROW_COUNT) {
   click <- append(click, rep(0, reach - unique_clicks))
 }
 
-d <- data.table(reivew_image = reivew_image,
-                postive_review = postive_review,
-                platform = platform,
-                click = click)
+d_plat <- data.table(
+                     ad = ad,
+                     ad_desc = ad_desc,
+                     reivew_image = reivew_image,
+                     postive_review = postive_review,
+                     platform = platform,
+                     click = click)
 
 # Look at data summary to confirm the number of data loaded and check means and quntiles
-summary(d)
+summary(d_plat)
 ```
 
 
 ```{r}
-mod_1 <- d[, lm(click ~ reivew_image + postive_review + reivew_image * postive_review)]
+mod_1 <- d_plat[, lm(click ~ reivew_image + postive_review + reivew_image * postive_review)]
 summary(mod_1)
 
 # When negative review + WITHOUT PICTURE -> positive review + WITHOUT PICTIRE: the impact in click rate we expect (-0.0017)
 ```
 
 ```{r}
-d[, negative_review := (postive_review - 1) * -1]
-d[, no_image := (reivew_image - 1) * -1]
+d_plat[, negative_review := (postive_review - 1) * -1]
+d_plat[, no_image := (reivew_image - 1) * -1]
 
-mod_2 <- d[, lm(click ~ no_image + negative_review + no_image * negative_review)]
+mod_2 <- d_plat[, lm(click ~ no_image + negative_review + no_image * negative_review)]
 summary(mod_2)
 
 # The negative_review here means:
