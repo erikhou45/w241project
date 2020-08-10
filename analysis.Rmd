@@ -1,0 +1,243 @@
+---
+title: "W241 Final Project Data Analysis"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+# Load packages
+library(foreign)
+library(data.table)
+library(knitr)
+library(sandwich)
+library(lmtest)
+library(stargazer)
+library(stringr)
+```
+
+
+```{r define_functions}
+# set an UDF to calculate robust standard error
+
+get_robust_se <- function(mod) {
+  sqrt(diag(vcovHC(mod)))
+}
+
+```
+
+We can only download data in aggregate form from Facebook. Here, we are going to load the .csv file in and genearte individual records similar to what we were asked to do in PS4 problem 3.
+
+```{r prep_data}
+# load the raw aggregated data downloaded from Facebook with gender and age
+d_raw_ag <- fread("data_w241_final_project_ag.csv")
+d_raw_ag <- as.data.frame(d_raw_ag)
+# head(d_raw_ag)
+
+# Transform the data by creating records from the aggregated records
+
+ROW_COUNT = nrow(d_raw_ag)
+reivew_image = c()
+postive_review = c()
+ad = c()
+ad_desc = c()
+age_group = c()
+gender = c()
+click = c()
+
+for (i in 1:ROW_COUNT) {
+  ad_set <- d_raw_ag[i,"Ad Set Name"]
+  age <- d_raw_ag[i, "Age"]
+  gen <- d_raw_ag[i, "Gender"]
+  reach <- d_raw_ag[i, "Reach"]
+  unique_clicks <- d_raw_ag[i, "Unique Link Clicks"]
+  
+  if (ad_set == "Ad Set for Ad A") {
+    reivew_image <- append(reivew_image, rep(1, reach))
+    postive_review <- append(postive_review, rep(1, reach))
+    ad <- append(ad, rep("A", reach))
+    ad_desc <- append(ad_desc, rep("Positve Review with Image", reach))
+  } else if (ad_set == "Ad Set for Ad B") {
+    reivew_image <- append(reivew_image, rep(0, reach))
+    postive_review <- append(postive_review, rep(1, reach))
+    ad <- append(ad, rep("B", reach))
+    ad_desc <- append(ad_desc, rep("Positve Review without Image", reach))
+  } else if (ad_set == "Ad Set for Ad C") {
+    reivew_image <- append(reivew_image, rep(1, reach))
+    postive_review <- append(postive_review, rep(0, reach))
+    ad <- append(ad, rep("C", reach))
+    ad_desc <- append(ad_desc, rep("Negative Review with Image", reach))
+  } else {
+    reivew_image <- append(reivew_image, rep(0, reach))
+    postive_review <- append(postive_review, rep(0, reach))
+    ad <- append(ad, rep("D", reach))
+    ad_desc <- append(ad_desc, rep("Negative Review without Image", reach))
+  }
+  
+  age_group <- append(age_group, rep(age, reach))
+  gender <- append(gender, rep(gen, reach))
+  
+  if (is.na(unique_clicks)) {
+    click <- append(click, rep(0, reach))
+  }
+  else {
+    click <- append(click, rep(1, unique_clicks))
+    click <- append(click, rep(0, reach - unique_clicks))
+  }
+}
+
+d_ag <- data.table(
+                     ad = ad,
+                     ad_desc = ad_desc,
+                     review_image = reivew_image,
+                     positive_review = postive_review,
+                     age_group = age_group,
+                     gender = gender,
+                     click = click)
+```
+
+
+```{r}
+# code to make table 1
+rows <- sample(nrow(d_ag))
+d_ag <- d_ag[rows, ]
+kable(head(d_ag), caption = "Sample Records after Data Manipulation")
+```
+
+
+## First Glance of the Result
+
+Before we start analyzing the data, let's take a look result by treatment group first.
+
+```{r}
+# code to make table 2
+kable(d_ag[, .("Click Count" = sum(click), 
+               "Participant Count" = .N,
+               "Click Rate" = paste(as.character(round(mean(click)*100,2)),"%")),
+     keyby = .(Ad = str_replace(ad_desc, "\n", " "))],
+     caption = "Result Overview")
+```
+
+There are two observations we have from the figure above:
+1. Contrary to our believe, the presence of image didn't drive down the click rate of ad with negative review. That is, our hypothesis of image might attract attention and make people pay attention to review might not be valid.
+2. We can see that the two ads with negative reviews had higher click rates than the ad with positive review without image. This observation suggests that the positivity of the review might not have any effect on people's interest in the product.
+
+However, since the data was collected from a randomized sample of participants, there is inherent statistical uncertainty. We will have to do further analysis to calculate standard error on the effect of review image and review positivity in order to know the significance in the above observations.
+
+
+## Covariate Balance Check
+
+We didn't have access to define or control the randomization process for A/B testing on Facebook. Therefore, we definitely would like to check the covariates' balance in different treatment groups before running regression analysis.
+
+Quick look at the covariate balance across different treatment groups by gender and age group:
+
+Look at the percentage of gender within different ads:
+```{r}
+# code to make table 3 and 4
+kable(d_ag[, round(prop.table(table(str_replace(ad_desc, "\n", " "), gender),1)*100,1)],
+      caption = "Gender Composition(%) of Treatment Groups")
+
+kable(d_ag[, round(prop.table(table(str_replace(ad_desc, "\n", " "), age_group),1)*100,1)],
+      caption = "Age Composition(%) of Treatment Groups")
+```
+
+Looking at the table 2 and table 3, we noticed that the gender and age compositions of different treatment groups are not very even. Given our sample size of 102880, we would expect the compositions of treatment groups by gender and age to be very comparable. Therefore, it's important to note that we have significantly more males in the "Positive Review with Image" group and significantly more females in "Positive Review without Image" group. As for the age compositions, we have significantly more participants of the age group 65+ in the "Positive Review without Image" group. This is concerning because it is a sign that the randomization for this experiment might have failed. The power of the experimental method comes from the fact that the participants in different treatmnet groups were statistically equivalent and when these equivalent groups were exposed to different treatments and subsequent difference in results was observed, we can conclude that it was the treatment variations that CAUSED the results to be different. However, if participants in one treatment group already differ from those in other groups, we can't logically attribute the difference in the results observed to the treatment anymore since the difference could very well come from the participants. In our case, if gender and age turned to be assoicated with people's tendency to click an ad, we don't know wheter the difference of click rates we see if table 1 is due to the treatments or simply the difference between the participants in each the treatment groups.
+
+Since the statistical equivalence between different treatment groups was the key to the vailidity of our experiment, we will perform formal tests to see whether covariates like gender and age were independent of the treatment variables, "review_image" and "positive_review".
+
+Perform the test:
+
+1. Use an F-test to check the whethter "gender" and "age_group" jointly have ability to predict treatment status compared with the null model which only has the bias term.
+
+```{r}
+#F-test 1
+null_mod <- d_ag[ , lm(review_image ~ 1)]
+full_mod <- d_ag[ , lm(review_image ~ as.factor(gender) + as.factor(age_group))]
+anova_mod <- anova(full_mod, null_mod, test = 'F')
+anova_mod
+```
+
+```{r}
+#F-test 2
+null_mod <- d_ag[ , lm(positive_review ~ 1)]
+full_mod <- d_ag[ , lm(positive_review ~ as.factor(gender) + as.factor(age_group))]
+anova_mod <- anova(full_mod, null_mod, test = 'F')
+anova_mod
+```
+
+Both tests are highly significant which means the covariates jointly has the ability to predict the treatment status. Unfortunately, this means the randomization test failed. This means the execution of the experiment was not clean enough to make causal claim about our causal effect of interest. Despite this fact, we will still run a regression analysis on the data because we could demonstrate the above conclusion with a different vehicle as a practice and additional proof.
+
+## Regression Analysis
+
+Since we have a 2x2 design, we will build a fully saturated model with 4 terms including the bias term. We will also also build three models with the gender and age_group covariates included separately and together.
+
+```{r results='asis'}
+# code to make table 5
+mod_1 <- d_ag[, lm(click ~ review_image
+                           + positive_review
+                           + review_image * positive_review)]
+# summary(mod_1)
+mod_2 <- d_ag[, lm(click ~ review_image 
+                           + positive_review 
+                           + review_image * positive_review 
+                           + as.factor(gender))]
+# summary(mod_2)
+mod_3 <- d_ag[, lm(click ~ review_image 
+                           + positive_review 
+                           + review_image * positive_review 
+                           + as.factor(age_group))]
+# summary(mod_3)
+mod_4 <- d_ag[, lm(click ~ review_image 
+                           + positive_review 
+                           + review_image * positive_review 
+                           + as.factor(gender)
+                           + as.factor(age_group))]
+
+stargazer(
+      mod_1,
+      mod_2,
+      mod_3,
+      mod_4,
+      se = list(get_robust_se(mod_1), 
+                get_robust_se(mod_2),
+                get_robust_se(mod_3),
+                get_robust_se(mod_4)),
+      # type = 'text',
+      title = "Regression Models",
+      digits = 5,
+      keep.stat = c("n", "rsq", "adj.rsq"),
+      order = c("^review_image$", "^positive_review$", "review_image:positive_review", "Constant"))
+```
+
+Looking at the first column in table 4, the naive interpretation is that the presence of a review image is predicted to increase the click rate by 0.38%. The model in column 1 also predicts the positivity of the text review to have no effect on the click rate and that the review image has an additional effect of 0.75% increase in click rate when the review is positive. However, the flaw in the randomization manifests when covariates that were supposed to have no effect on the point estimates of the treatment coefficients were included in regression. Though column 2 didn't show significant shifts in estimates of treatment effects likely due to gender having no association with the outcome variable, in column 3, we can see the estimated coefficients shifted for both review_image and positive_review. We think it's likely caused by the age_group variable being highly predictive of the outcome variable (similar results were obervered in column 4 where both gender and age_group were included in regression).
+
+The significant shifts in the estimates of the treatment effect when covariates are included invalidate the finding in the fully saturated model in column 1. Calculating how much the treatment variable coefficients shift bewteen column 1 and column 3, we see review_image goes from 0.00375 to 0.0432 (15.2% increase), and postive_review goes from -0.00169 to -0.00268 (58.6% decrease). 
+
+This finding tells us the inclusion of covariates significantly change our estimated causal effect which should not happen with a successful randomiation because covariates should have been idependent of treatment variations. When we see treatment effect estiamtes shifting by the inclusion of covariates like this, we lose confidence in the results. Since we don't know whether there are other observed covariates which could also shift estimated treatment effect like age_group.  
+
+
+## Appendix
+
+Print the sample records of the raw data:
+
+```{r}
+# code to make table 6
+sample_records <- d_raw_ag[d_raw_ag$"Ad Set Name" %in% 
+                             c("Ad Set for Ad A"), 
+                           c("Ad Set Name", "Age", "Gender", 
+                             "Reach", "Unique Link Clicks")]
+
+sample_records <- sample_records[order(sample_records$"Ad Set Name",
+                                       sample_records$"Age",
+                                       sample_records$"Gender"), ]
+
+kable(sample_records, 
+      row.names = FALSE,
+      caption = "Sample Records of Raw Data")
+```
